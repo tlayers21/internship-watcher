@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -36,7 +36,7 @@ jobs:
 
       - name: Commit updated state
         run: |
-          git config user.name "internship-watcher-bot"
+          git config user.name "internship-bot"
           git config user.email "actions@github.com"
           git add state.json
           git diff --quiet --cached || git commit -m "Update README state [skip ci]"
