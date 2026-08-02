@@ -1,171 +1,161 @@
 # Internship Watcher
 
-Watches GitHub repos (like SimplifyJobs/Summer2026-Internships) for new rows added
-to their README, and emails you when new internships show up.
+## What this is
 
-## Local dev setup (uv)
+`internship-watcher` watches GitHub repos that track internship postings (like
+SimplifyJobs) and emails you whenever a new listing shows up so you don't have
+to manually check each repo or deal with using the GitHub watch repo feature.
 
-This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+**How it decides something is "new":** every run, it fetches the current
+README for each repo you're tracking, compares it against a saved copy
+from the last run, and pulls out any listing rows that weren't there
+before. It's smart about a few things:
 
-1. Install uv if you don't have it:
+- Supports repos that use plain markdown tables (`| Company | Role | ... |`)
+  **and** repos that use raw HTML tables (`<table><tr><td>...`) — both
+  formats are auto-detected, no configuration needed.
+- Ignores fields that naturally change for an *existing* listing over time
+  (like a relative "Age" column ticking from `0d` to `3d`), so you don't
+  get spammed about the same posting every run just because a day passed.
+- Pulls out the actual "Apply" link for each new listing, not just raw
+  page text, so the email is directly actionable.
+
+**Where it runs:** entirely on GitHub Actions, on a schedule you control
+(hourly by default). No server is required.
+
+---
+
+## How it works, in short
+
+1. A scheduled GitHub Actions workflow runs the script on a timer.
+2. The script fetches each tracked repo's README via the GitHub API.
+3. It diffs the fresh copy against `state.json` (the last saved version,
+   committed to the repo).
+4. Any genuinely new listings get emailed to you via SMTP.
+5. The script commits the updated `state.json` back to the repo, so the
+   next run knows what it already saw.
+
+---
+
+## Setup
+
+### 1. Fork this repo
+
+Fork this repo, then clone your fork locally:
+
 ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-2. From the project folder, install dependencies (creates a `.venv` automatically):
-```bash
-   uv sync
-```
-3. Set up your local secrets:
-```bash
-   cp .env.example .env
-```
-   Then open `.env` and fill in your real `EMAIL_ADDRESS`, Gmail app password
-   for `EMAIL_PASSWORD`, and `TO_EMAIL`. This file is gitignored — it never
-   gets committed.
-4. Run the script locally to test it:
-```bash
-   uv run python check_internships.py
-```
-   The script loads `.env` automatically. First run just saves a baseline
-   (no email sent). Delete a line from `state.json` afterward and re-run if
-   you want to force-trigger the email path for testing.
-5. Lint / format with ruff, which is included as a dev dependency:
-```bash
-   uv run ruff check .
+git clone https://github.com/<your-username>/internship-watcher.git
+cd internship-watcher
 ```
 
-`pyproject.toml` pins Python 3.11+ and lists `requests` as the only runtime
-dependency, with `pytest` and `ruff` available for dev use. The GitHub Actions
-workflow doesn't use uv — it just does a plain `pip install requests` on the
-runner, since that's the only dependency it actually needs at run time.
+### 2. Set up a sending email account
 
-## Deployment (GitHub Actions)
+You'll need a Gmail account and an **app password** (not your real Gmail
+password). You can use your current account or setup a dedicated account.
 
-1. **Create a new GitHub repo** (private is fine) and push these files
-   to it, keeping the folder structure:
-   - `check_internships.py`
-   - `config.json`
-   - `.github/workflows/daily-check.yml`
-   - This `README.md`
+1. Create or choose a Gmail account to send from.
+2. Turn on **2-Step Verification**: https://myaccount.google.com/security
+   (this is required - app passwords don't exist as an option until 2FA
+   is on).
+3. Go to https://myaccount.google.com/apppasswords
+4. Name it anything (e.g. `internship-watcher`) -> **Create**
+5. Copy the 16-character password shown - you'll only see it once.
 
-2. **Get a Gmail App Password** (don't use your real Gmail password):
-   - Go to https://myaccount.google.com/apppasswords
-   - Generate a 16-character app password for "Mail"
-   - (Requires 2-Step Verification to be turned on for your Google account)
+### 3. Add your GitHub repo secrets
 
-3. **Add repo secrets**: In your new GitHub repo, go to
-   `Settings -> Secrets and variables -> Actions -> New repository secret`
-   and add:
-   - `EMAIL_ADDRESS` — the Gmail address sending the alert
-   - `EMAIL_PASSWORD` — the app password from step 2
-   - `TO_EMAIL` — where you want alerts sent. Supports a single address or a
-     comma-separated list for multiple people, e.g.
-     `you@gmail.com, friend@school.edu, other@gmail.com`
+In your forked repo: **Settings -> Secrets and variables -> Actions ->
+Secrets tab -> New repository secret**. Add all three:
 
-   You do NOT need to add a `GH_TOKEN` secret — the workflow automatically
-   provides `GITHUB_TOKEN`, which is enough for reading public repo READMEs.
+| Name | Value |
+|---|---|
+| `EMAIL_ADDRESS` | The Gmail address sending the alerts |
+| `EMAIL_PASSWORD` | The 16-character app password from step 2 |
+| `TO_EMAIL` | Where alerts go. Supports a single address or a comma-separated list for multiple emails, e.g. `you@gmail.com, friend@school.edu` |
 
-4. **Edit `config.json`** to whichever repos you actually want to track, and
-   optionally add keywords to filter on. Each repo entry can be a plain
-   `"owner/repo"` string (uses the default branch), or an object with a
-   `branch` if the repo's real content lives somewhere other than the
-   default branch (common for these internship-tracker repos — the main
-   branch README is often just a landing page, and the actual table lives
-   on a `dev` branch):
+You do *not* need to add a `GH_TOKEN` secret - GitHub automatically
+provides `GITHUB_TOKEN` to every workflow run, which the script uses to
+get a higher API rate limit than anonymous requests get.
+
+### 4. Add the repos you want to track
+
+Open `config.json`. This is the only file most people need to touch to
+customize what gets watched:
 
 ```json
-   {
-     "repos": [
-       "some/simple-repo",
-       { "repo": "SimplifyJobs/Summer2027-Internships", "branch": "dev" }
-     ],
-     "keywords": ["machine learning", "AI", "data"]
-   }
+{
+  "repos": [
+    "some/simple-repo",
+    { "repo": "SimplifyJobs/Summer2027-Internships", "branch": "dev" }
+  ],
+  "keywords": []
+}
 ```
 
-   - `repos` — required. Plain string = default branch. Object with `branch`
-     = fetch from that specific branch instead.
-   - `keywords` — optional. Leave as `[]` to get every new row. If you list
-     keywords, a new row only counts (and gets emailed) if it contains at
-     least one of them, case-insensitive.
+**Optional keyword filter:** leave `"keywords": []` to get every new
+listing across all tracked repos. Or list terms (case-insensitive) -
+a new listing only counts and gets emailed if it contains at least one:
 
-   **Tip:** if a repo shows "0 table rows found" when testing locally, check
-   its GitHub page for a banner pointing to a different branch (e.g. "see
-   the dev branch for the latest list") — that means the default branch
-   README doesn't have the actual data.
+```json
+"keywords": ["machine learning", "AI", "data", "software engineer"]
+```
 
-5. **Pick your check frequency**: edit the `cron` line in
-   `.github/workflows/daily-check.yml`. It currently runs every hour
-   (`0 * * * *`). This is free on GitHub's tier regardless of repo
-   visibility — public repos get unlimited Actions minutes, and private
-   repos get 2,000 min/month free, and even hourly runs only use roughly
-   250-350 of those. Use https://crontab.guru to build a different schedule
-   if you want less/more frequent checks. GitHub doesn't guarantee
-   scheduled runs fire at the exact minute — expect some drift, especially
-   at busy times like the top of the hour.
+### 5. Pick your check frequency
 
-6. **First run**: go to the Actions tab in your repo, select
-   "Internship Check", and click "Run workflow" to trigger it manually.
-   The first run just saves a baseline (no email, since it has nothing to
-   compare against yet) — that's expected. Every run after that will detect
-   and email you about new rows.
+The included workflow (`.github/workflows/daily-check.yml`) runs every
+hour by default:
 
-## How it works
+```yaml
+schedule:
+  - cron: "0 * * * *"
+```
 
-- GitHub Actions runs the script daily on their infrastructure — no server
-  needed on your end.
-- The script fetches each repo's README via the GitHub API, diffs it against
-  the last saved copy (`state.json`, committed back to your repo each run),
-  and pulls out any newly added markdown table rows.
-- If anything new is found, it emails you a plain-text summary grouped by repo.
+### 6. First run
 
-## Customizing
+Go to your repo's **Actions** tab -> click **Internship Check** in the
+left sidebar -> click **Run workflow** -> confirm. This first run only
+saves a baseline snapshot of each repo's README -> it won't email you,
+since there's nothing to compare against yet.
 
-- **Filter by keyword**: set the `keywords` list in `config.json` (see step 4
-  above) — no code changes needed.
-- **Different email provider**: change `SMTP_HOST` / `SMTP_PORT` secrets if
-  you're not using Gmail (e.g. Outlook, a transactional email service like
-  Resend or SendGrid's SMTP relay).
-- **Different check frequency**: edit the `cron` line — see step 5 above.
+**Before this first run**, make sure `state.json` doesn't already contain
+someone else's saved data (e.g. if you're picking this up from an
+existing fork) -> delete it if so, so your baseline is built fresh from
+scratch:
 
-## Optional: keep alert emails organized (Gmail) — personal note
+```bash
+rm state.json
+git add state.json
+git commit -m "Reset state for fresh fork"
+git push
+```
 
-This is a personal Gmail-organization tip, not part of this repo — if you
-fork this project, you won't get this by default, and that's fine, it's
-independent of the actual check/email pipeline.
+Then trigger the workflow.
 
-If you don't want alert emails cluttering your main inbox long-term, but
-still want a phone notification when one arrives:
+---
 
-1. In Gmail, create a filter matching the sender you configured as
-   `EMAIL_ADDRESS` (Settings -> Filters and Blocked Addresses -> Create a
-   new filter). Apply a label like `Internship Opportunities`. **Don't**
-   check "Skip the Inbox" — mail that skips the Inbox generally won't
-   trigger push notifications on mobile.
-2. Optionally, set up a small Google Apps Script (in your own Google
-   account, at script.google.com — unrelated to this GitHub repo) that
-   auto-archives labeled mail out of your Inbox on an hourly timer, after
-   it's had a chance to notify you.
+## Local development & testing
 
-## Using this for yourself (forking)
+This project uses [uv](https://docs.astral.sh/uv/) for local dependency
+management (the GitHub Actions workflow itself just uses plain `pip`,
+since it only needs one runtime dependency).
 
-This project is written to be forked and reused — nothing here is
-hardcoded to a specific person's repos or email:
-
-1. Fork this repo to your own GitHub account (top-right "Fork" button on
-   GitHub) rather than cloning it — a fork gives you your own independent
-   copy with your own commit history, Actions runs, and secrets, with no
-   ongoing link back to the original.
-2. **Delete `state.json`** before your first run. It holds whoever set up
-   the fork's saved README snapshots — starting fresh means your fork
-   builds its own accurate baseline instead of inheriting someone else's.
-3. Follow the Deployment steps above with your own repo — the only files
-   you need to touch are `config.json` (which repos/keywords you want) and
-   the three GitHub Secrets (your own sending/receiving email addresses).
-4. `check_internships.py`, the workflow, and `pyproject.toml` don't need
-   any edits for a standard setup — they're generic.
-5. If you're tracking a different internship-listing repo that isn't in
-   the SimplifyJobs/vanshb03/dev-branch family, just check whether its
-   README's actual table is markdown pipe (`| Company | Role | ... |`) or
-   raw HTML (`<table><tr><td>...`) — both are supported automatically, no
-   code changes needed either way.
+1. Install uv:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+2. Install dependencies:
+   ```bash
+   uv sync
+   ```
+3. Set up local secrets:
+   ```bash
+   cp .env.example .env
+   ```
+   Fill in your real values in `.env` — it's gitignored, never committed.
+4. Run it:
+   ```bash
+   uv run python check_internships.py
+   ```
+5. Lint:
+   ```bash
+   uv run ruff check .
+   ```
