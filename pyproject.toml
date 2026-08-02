@@ -1,5 +1,5 @@
 [project]
-name = "intern-radar"
+name = "internship-watcher"
 version = "0.1.0"
 description = "Watches GitHub repos' READMEs for new internship postings and emails you when they show up."
 readme = "README.md"
