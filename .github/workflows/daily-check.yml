@@ -1,0 +1,42 @@
+name: Daily Internship Check
+
+on:
+  schedule:
+    # Runs at 13:00 UTC every day — adjust for your timezone.
+    # (e.g. 13:00 UTC = 9:00 AM Eastern during EDT)
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab to test
+
+permissions:
+  contents: write  # needed so the workflow can commit state.json back
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run internship check
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python check_internships.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "internship-bot"
+          git config user.email "actions@github.com"
+          git add state.json
+          git diff --quiet --cached || git commit -m "Update README state [skip ci]"
+          git push

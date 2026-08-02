@@ -1,0 +1,29 @@
+[project]
+name = "intern-radar"
+version = "0.1.0"
+description = "Watches GitHub repos' READMEs for new internship postings and emails you when they show up."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+check-internships = "check_internships:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+include = ["check_internships.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
