@@ -1,6 +1,6 @@
 # Internship Watcher
 
-## What this is
+## About
 
 `internship-watcher` watches GitHub repos that track internship postings (like
 SimplifyJobs) and emails you whenever a new listing shows up so you don't have
@@ -25,7 +25,7 @@ before. It's smart about a few things:
 
 ---
 
-## How it works, in short
+## How it works
 
 1. A scheduled GitHub Actions workflow runs the script on a timer.
 2. The script fetches each tracked repo's README via the GitHub API.
