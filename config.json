@@ -1,7 +1,8 @@
 {
   "repos": [
-    "SimplifyJobs/Summer2026-Internships",
-    "vanshb03/Summer2026-Internships"
+    { "repo": "SimplifyJobs/Summer2027-Internships", "branch": "dev" },
+    { "repo": "vanshb03/Summer2027-Internships", "branch": "dev" },
+    "sndsh404/summer-2027-internships"
   ],
   "keywords": []
 }

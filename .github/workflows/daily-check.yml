@@ -1,10 +1,11 @@
-name: Daily Internship Check
+name: Internship Check
 
 on:
   schedule:
-    # Runs at 13:00 UTC every day — adjust for your timezone.
-    # (e.g. 13:00 UTC = 9:00 AM Eastern during EDT)
-    - cron: "0 13 * * *"
+    # Runs every hour, on the hour (UTC). Free tier easily covers this —
+    # each run takes ~30-60s, so even hourly is well under GitHub's free
+    # 2,000 min/month for private repos (and unlimited for public repos).
+    - cron: "0 * * * *"
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab to test
 
 permissions:
@@ -35,7 +36,7 @@ jobs:
 
       - name: Commit updated state
         run: |
-          git config user.name "internship-bot"
+          git config user.name "internship-watcher-bot"
           git config user.email "actions@github.com"
           git add state.json
           git diff --quiet --cached || git commit -m "Update README state [skip ci]"
