@@ -9,6 +9,9 @@ How it decides something is "new":
   candidate listing rows, supporting two table formats: raw HTML
   (<table><tr>...</tr></table>) and markdown pipe tables (| Company | ... |).
 - Separator rows (e.g. "|---|---|") and header rows are filtered out.
+- A row's identity is its apply link, not its full text — so a listing isn't
+  re-emailed just because a display-only field changed (an "Age" column
+  ticking up, a "Date Posted" getting bumped, a trending flag appearing).
 
 State is stored in state.json and committed back to the repo by the GitHub
 Action, so the next run knows what it already saw.
@@ -100,51 +103,77 @@ def extract_rows(content: str) -> list[str]:
     return [line.strip() for line in content.splitlines() if is_candidate_pipe_row(line)]
 
 
-def row_key(row: str) -> str:
-    """
-    Stable identity for a row, ignoring fields that naturally change over time
-    for the SAME listing (like a relative 'Age' column e.g. '0d' -> '5d'),
-    so aging listings don't get mistaken for new ones every run.
-    """
-    if row.startswith("<tr>"):
-        # drop the last <td>...</td> before </tr> — that's the Age column
-        return re.sub(r"<td>[^<]*</td>\s*</tr>\s*$", "</tr>", row)
-    return row
+def strip_tags(s: str) -> str:
+    """Strip HTML tags and collapse whitespace, for turning a cell's HTML into plain text."""
+    text = re.sub(r"<[^>]+>", " ", s)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def extract_link(cell_html: str) -> str | None:
-    """Pull the first href out of a table cell — this is reliably the 'Apply' link."""
-    hrefs = re.findall(r'href="([^"]+)"', cell_html)
-    return hrefs[0] if hrefs else None
+    """
+    Pull a listing's URL out of a single cell — this is reliably the 'Apply' link.
+    Supports both raw HTML (href="...") and markdown ([text](url)) link syntax,
+    since different tracked repos use either for their Apply column.
+    """
+    href = re.search(r'href="([^"]+)"', cell_html)
+    if href:
+        return href.group(1)
+    md_link = re.search(r"\((https?://[^)]+)\)", cell_html)
+    return md_link.group(1) if md_link else None
+
+
+def row_key(row: str) -> str:
+    """
+    Stable identity for a row. Prefers the listing's apply link (query string
+    stripped, since tracking params can rotate between fetches) because that's
+    what actually identifies a specific job posting — unlike the row's full
+    text, it doesn't change when a volatile display-only field does (a
+    relative 'Age' column '0d' -> '5d', a 'Date Posted'/'Added' column that
+    gets bumped when a listing is re-surfaced, a trending flag appearing
+    later). Those were previously part of the row's identity and caused
+    already-seen listings to be re-emailed as "new". Falls back to the row
+    text (minus its trailing age/date cell) if no link can be found.
+    """
+    if row.startswith("<tr>"):
+        cells = re.findall(r"<td>(.*?)</td>", row, re.DOTALL)
+        link = extract_link(cells[3]) if len(cells) > 3 else None
+        if link:
+            return link.split("?", 1)[0]
+        # drop the last <td>...</td> before </tr> — that's the Age column
+        return re.sub(r"<td>[^<]*</td>\s*</tr>\s*$", "</tr>", row)
+
+    parts = [p.strip() for p in row.strip("|").split("|")]
+    link = extract_link(parts[3]) if len(parts) > 3 else None
+    if link:
+        return link.split("?", 1)[0]
+    # markdown fallback: drop the trailing date/age cell
+    return "|".join(parts[:-1]) if len(parts) > 1 else row
 
 
 def summarize_row(row: str) -> dict:
     """
     Turn a raw row (HTML or markdown) into a structured dict for the email:
-    {"company": ..., "role": ..., "location": ..., "link": ...}
+    {"company": ..., "role": ..., "location": ..., "link": ..., "posted": ...}
     """
     if row.startswith("<tr>"):
         cells = re.findall(r"<td>(.*?)</td>", row, re.DOTALL)
-
-        def strip_tags(s: str) -> str:
-            text = re.sub(r"<[^>]+>", " ", s)
-            return re.sub(r"\s+", " ", text).strip()
-
         return {
             "company": strip_tags(cells[0]) if len(cells) > 0 else "?",
             "role": strip_tags(cells[1]) if len(cells) > 1 else "?",
             "location": strip_tags(cells[2]) if len(cells) > 2 else "?",
             "link": extract_link(cells[3]) if len(cells) > 3 else None,
+            "posted": strip_tags(cells[4]) if len(cells) > 4 else None,
         }
 
-    # markdown pipe row fallback: | Company | Role | Location | [Apply](url) | Date |
+    # markdown pipe row: | Company | Role | Location | Apply | Date | — the Apply
+    # cell may be markdown `[text](url)` or raw HTML `<a href="...">`.
     parts = [p.strip() for p in row.strip("|").split("|")]
-    link_match = re.search(r"\((https?://[^)]+)\)", row)
     return {
         "company": re.sub(r"[\[\]*]", "", parts[0]) if len(parts) > 0 else "?",
         "role": parts[1] if len(parts) > 1 else "?",
         "location": parts[2] if len(parts) > 2 else "?",
-        "link": link_match.group(1) if link_match else None,
+        "link": extract_link(parts[3]) if len(parts) > 3 else None,
+        "posted": parts[4] if len(parts) > 4 else None,
     }
 
 
@@ -232,6 +261,8 @@ def main() -> int:
             block = [repo, "-" * len(repo)]
             for listing in listings:
                 block.append(f"• {listing['company']} — {listing['role']} ({listing['location']})")
+                if listing["posted"]:
+                    block.append(f"  Posted: {listing['posted']}")
                 if listing["link"]:
                     block.append(f"  Apply: {listing['link']}")
                 block.append("")  # blank line between listings
