@@ -40,4 +40,7 @@ jobs:
           git config user.email "actions@github.com"
           git add state.json
           git diff --quiet --cached || git commit -m "Update README state [skip ci]"
+          # rebase first: a queued concurrent run would otherwise fail the
+          # push and silently drop this run's state
+          git pull --rebase
           git push
